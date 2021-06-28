@@ -3,8 +3,8 @@ import numpy as np
 import cv2
 import scipy.io as sio
 from math import cos, sin
-import dlib
-from imutils import face_utils
+#import dlib
+#from imutils import face_utils
 
 def plot_pose_cube(img, yaw, pitch, roll, tdx=None, tdy=None, size=150.):
     # Input is a cv2 image
@@ -125,3 +125,4 @@ def crop_face_loosely(shape, img, input_size):
     normed_img = (input_img - input_img.mean()) / input_img.std()
     
     return normed_img
+

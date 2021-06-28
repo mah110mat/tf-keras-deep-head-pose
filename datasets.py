@@ -4,31 +4,42 @@ import cv2
 import scipy.io as sio
 import utils
 import random
+import tensorflow as tf
 
 
 def split_samples(samples_file, train_file, test_file, ratio=0.8):
-    with open(samples_file) as samples_fp:
-        lines = samples_fp.readlines()
-        random.shuffle(lines)
+    if os.path.isfile(train_file) and os.path.isfile(test_file):
+        with open(train_file) as ftp:
+            lines = ftp.readlines()
+            train_num = int(len(lines))
+            ftp.close()
+        with open(test_file) as ftp:
+            lines = ftp.readlines()
+            test_num = int(len(lines))
+            ftp.close()
+    else:
+        with open(samples_file) as samples_fp:
+            lines = samples_fp.readlines()
+            random.shuffle(lines)
 
-        train_num = int(len(lines) * ratio)
-        test_num = len(lines) - train_num
-        count = 0
-        data = []
-        for line in lines:
-            count += 1
-            data.append(line)
-            if count == train_num:
-                with open(train_file, "w+") as train_fp:
-                    for d in data:
-                        train_fp.write(d)
-                data = []
+            train_num = int(len(lines) * ratio)
+            test_num = len(lines) - train_num
+            count = 0
+            data = []
+            for line in lines:
+                count += 1
+                data.append(line)
+                if count == train_num:
+                    with open(train_file, "w+") as train_fp:
+                        for d in data:
+                            train_fp.write(d)
+                    data = []
 
-            if count == train_num + test_num:
-                with open(test_file, "w+") as test_fp:
-                    for d in data:
-                        test_fp.write(d)
-                data = []
+                if count == train_num + test_num:
+                    with open(test_file, "w+") as test_fp:
+                        for d in data:
+                            test_fp.write(d)
+                    data = []
     return train_num, test_num
                 
 def get_list_from_filenames(file_path):
@@ -152,7 +163,7 @@ class Biwi:
         # print(save_path)
         cv2.imwrite(save_path, cv2_img)
         
-    def data_generator(self, shuffle=True, test=False):
+    def data_generator(self, shuffle=False, test=False):
         sample_file = self.train_file
         if test:
             sample_file = self.test_file
@@ -194,7 +205,7 @@ class Biwi:
                 break
 
 class AFLW2000:
-    def __init__(self, data_dir, data_file, batch_size=16, input_size=64):
+    def __init__(self, data_dir, data_file, batch_size=16, input_size=64, ratio=0.95, preprocess='Linear'):
         self.data_dir = data_dir
         self.data_file = data_file
         self.batch_size = batch_size
@@ -203,7 +214,27 @@ class AFLW2000:
         self.test_file = None
         self.__gen_filename_list(os.path.join(self.data_dir, self.data_file))
         self.train_num, self.test_num = self.__gen_train_test_file(os.path.join(self.data_dir, 'train.txt'),
-                                                                   os.path.join(self.data_dir, 'test.txt'))
+                                                                   os.path.join(self.data_dir, 'test.txt'), ratio)
+        if preprocess is 'Linear':
+            self.preprocess = self.__linear
+        elif preprocess is 'Alexnet':
+            self.preprocess = self.__Alexnet
+        elif preprocess is 'Mobilenet':
+            self.preprocess = self.__Mobilenet
+        elif preprocess is 'Mobilenetv2':
+            self.preprocess = self.__Mobilenet
+        else:
+            self.preprocess = self.__linear
+
+    def __linear(self, img):
+        return img
+    def __Alexnet(self, img):
+        return (img - img.mean()) / img.std()
+    def __Mobilenet(self, img):
+        img /= 128.
+        img -= 1.
+        return img
+
     def __get_ypr_from_mat(self, mat_path):
         mat = sio.loadmat(mat_path)
         pre_pose_params = mat['Pose_Para'][0]
@@ -216,6 +247,7 @@ class AFLW2000:
         return pt2d
     
     def __get_input_img(self, data_dir, file_name, img_ext='.jpg', annot_ext='.mat'):
+        #tf.print(file_name)
         img = cv2.imread(os.path.join(data_dir, file_name + img_ext))
         pt2d = self.__get_pt2d_from_mat(os.path.join(data_dir, file_name + annot_ext))
         
@@ -248,15 +280,22 @@ class AFLW2000:
         if y_max > img.shape[0]:
             x_min += abs(y_max - img.shape[0])
             y_max = img.shape[0]
+
+        #if file_name == 'image02122':
+        #    tf.print(x_min, y_min, x_max, y_max)
+        #    tf.print(img.shape)
         
         # print("x_min:{},x_max:{},y_min:{},y_max{}".format(x_min, x_max, y_min, y_max))
-        crop_img = img[int(y_min):int(y_max), int(x_min):int(x_max)]
+        crop_img = np.array(img[int(y_min):int(y_max), int(x_min):int(x_max)]).astype('float')
         
         # print(crop_img.shape)
         # cv2.imshow('crop_img', crop_img)
         # cv2.waitKey(0)
+        #crop_img = np.asarray(cv2.resize(crop_img, (self.input_size, self.input_size)))
+        #normed_img = (crop_img - crop_img.mean()) / crop_img.std()
+
         crop_img = np.asarray(cv2.resize(crop_img, (self.input_size, self.input_size)))
-        normed_img = (crop_img - crop_img.mean()) / crop_img.std()
+        normed_img = self.preprocess(crop_img)
         # print(normed_img)
         return normed_img
     
@@ -275,6 +314,8 @@ class AFLW2000:
         # Bin values
         bins = np.array(range(-99, 99, 3))
         bin_labels = np.digitize([yaw, pitch, roll], bins) - 1
+        bin_labels = np.clip(bin_labels, 0, len(bins)-1)
+        #bin_labels = np.digitize([yaw, pitch, roll], bins)
         
         return bin_labels, cont_labels
 
@@ -286,10 +327,10 @@ class AFLW2000:
                         if os.path.splitext(f)[1] == '.jpg':
                             tlf.write(os.path.splitext(f)[0] + '\n')
                             
-    def __gen_train_test_file(self, train_file, test_file):
+    def __gen_train_test_file(self, train_file, test_file, ratio):
         self.train_file = train_file
         self.test_file = test_file
-        return split_samples(os.path.join(self.data_dir, self.data_file), self.train_file, self.test_file, ratio=0.8)
+        return split_samples(os.path.join(self.data_dir, self.data_file), self.train_file, self.test_file, ratio)
 
     def train_num(self):
         return self.train_num
@@ -306,32 +347,40 @@ class AFLW2000:
                             size=100)
         save_path = os.path.join(save_dir, name + '.jpg')
         # print(save_path)
+
         cv2.imwrite(save_path, cv2_img)
+        save_path_txt = os.path.join(save_dir, name + '.txt')
+        with open(save_path_txt, 'w') as fpo:
+            yaw, pitch, roll = prediction[0], prediction[1], prediction[2]
+            fpo.write('{:.3f} {:.3f} {:.3f}'.format( prediction[0], prediction[1], prediction[2]))
+            fpo.close()
         
-    def data_generator(self, shuffle=True, test=False):
+    def data_generator(self, shuffle=False, test=False):
         sample_file = self.train_file
+        batch_size = self.batch_size
         if test:
             sample_file = self.test_file
+            batch_size = 1
             
         filenames = get_list_from_filenames(sample_file)
         file_num = len(filenames)
-        print(file_num)
+        #print(file_num)
         while True:
             if shuffle:
                 idx = np.random.permutation(range(file_num))
                 filenames = np.array(filenames)[idx]
-            max_num = file_num - (file_num % self.batch_size)
-            for i in range(0, max_num, self.batch_size):
+            max_num = file_num - (file_num % batch_size)
+            for i in range(0, max_num, batch_size):
                 batch_x = []
                 batch_yaw = []
                 batch_pitch = []
                 batch_roll = []
                 names = []
-                for j in range(self.batch_size):
+                for j in range(batch_size):
                     img = self.__get_input_img(self.data_dir, filenames[i + j])
                     bin_labels, cont_labels = self.__get_input_label(self.data_dir, filenames[i + j])
                     # print(img.shape)
-                    batch_x.append(img)
+                    batch_x.append(img.copy())
                     batch_yaw.append([bin_labels[0], cont_labels[0]])
                     batch_pitch.append([bin_labels[1], cont_labels[1]])
                     batch_roll.append([bin_labels[2], cont_labels[2]])
