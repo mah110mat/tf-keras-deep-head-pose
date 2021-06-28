@@ -148,5 +148,45 @@ class AlexNet(BASEMODEL):
             model.summary(print_fn=lambda x: fp.write(x + "\r\n"))
         return model
         
+class Mobilenetv2(BASEMODEL):
+    def __init__(self, dataset, class_num, batch_size, input_size):
+        super().__init__(dataset, class_num, batch_size, input_size)
+        self.model = self.__create_model()
+
+    def __create_model(self):
+        backbone = tf.keras.applications.MobileNetV2(
+            weights="imagenet", 
+            include_top=False, input_shape=(self.input_size, self.input_size, 3)
+            )
+        #backbone.trainable = False
+
+        inputs = tf.keras.layers.Input(shape=(self.input_size, self.input_size, 3))
+        feature = backbone(inputs)
+
+        #feature = keras.layers.SeparableConv2D(1280 , kernel_size=3, strides=1, activation="relu")(feature)
+        #feature = tf.keras.layers.GlobalAveragePooling2D()(feature)
+
+        feature = tf.keras.layers.MaxPool2D(pool_size=(3, 3), strides=2)(feature)
+        feature = tf.keras.layers.Flatten()(feature)
+        feature = tf.keras.layers.Dropout(0.5)(feature)
+        feature = tf.keras.layers.Dense(units=4096, activation=tf.nn.relu)(feature)
+        
+        fc_yaw = tf.keras.layers.Dense(name='yaw', units=self.class_num)(feature)
+        fc_pitch = tf.keras.layers.Dense(name='pitch', units=self.class_num)(feature)
+        fc_roll = tf.keras.layers.Dense(name='roll', units=self.class_num)(feature)
+    
+        model = tf.keras.Model(inputs=inputs, outputs=[fc_yaw, fc_pitch, fc_roll])
+        
+        losses = {
+            'yaw':self.loss_angle,
+            'pitch':self.loss_angle,
+            'roll':self.loss_angle,
+        }
+        
+        model.compile(  optimizer=tf.keras.optimizers.Adam(lr=0.0001),
+                        loss=losses)
+       
+        with open("model_movilenetv2.txt", "w") as fp:
+            model.summary(print_fn=lambda x: fp.write(x + "\r\n"))
         return model
         

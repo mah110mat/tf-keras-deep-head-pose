@@ -6,5 +6,6 @@ Detailed design doc, please reference to:
 
 ![image](https://github.com/Oreobird/effect3d/blob/master/wechat.jpg)
 
-# Features
+## Features
   - tensorflow 2.4
+  - add mobilenetv2 backbone
