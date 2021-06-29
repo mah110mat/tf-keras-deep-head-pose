@@ -1,0 +1,12 @@
+PROJECT_DIR : "./"
+DATA_DIR : '../data/AFLW2000/'
+MODEL_FILE : 'models/aflw2000_model_alexnet.h5'
+TEST_SAVE_DIR : '../log/aflw2000_test.2.alexnet/'
+
+BIN_NUM    : 66
+INPUT_SIZE : 64
+BATCH_SIZE : 16
+EPOCHS     : 20
+DATASET    : 'AFLW2000'
+
+BACKBONE   : 'AlexNet'

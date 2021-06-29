@@ -65,10 +65,8 @@ class BASEMODEL:
                             patience=10,
                             )
             def lr_schedul(epoch):
-                x = 0.0002
-                if epoch >= 20:
-                    x = 0.0001
-                if epoch >= 100:
+                x = 0.0001
+                if epoch >= 30:
                     x = 0.00005
                 return x
             lr_decay = tf.keras.callbacks.LearningRateScheduler( lr_schedul, verbose=1,)

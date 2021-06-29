@@ -4,6 +4,7 @@ import cv2
 import scipy.io as sio
 from math import cos, sin
 import tensorflow as tf
+import yaml
 #import dlib
 #from imutils import face_utils
 
@@ -127,4 +128,39 @@ def crop_face_loosely(shape, img, input_size):
     
     return normed_img
 
+import datasets
+import models
+class Config:
+    def __init__(self, yamlfile): 
+        with open(yamlfile) as fyaml: 
+            dy = yaml.load(fyaml)
+            assert ('MODEL_FILE' in dy.keys()),"set MODEL_FILE"
+
+        if 'BACKBONE' not in dy.keys():
+            basename = os.path.basename(yamlfile).split('.')[0]
+            dy.setdefault('BACKBONE'   , basename)
+            assert (dy['BACKBONE'] in ['AlexNet', 'Mobilenetv2']), "invalid BACKBONE,{}".format(dy['BACKBONE'])
+
+        dy.setdefault('PROJECT_DIR'   , './')
+        dy.setdefault('DATASET'      , 'AFLW2000')
+        dy.setdefault('DATA_DIR'      , '../data/')
+        dy.setdefault('TEST_SAVE_DIR' , '../log/')
+        dy.setdefault('BIN_NUM'       , 66)
+        dy.setdefault('INPUT_SIZE'    , 96)
+        dy.setdefault('BATCH_SIZE'    , 16)
+        dy.setdefault('EPOCHS'        , 20)
+
+        for tag in ['MODEL_FILE', 'DATA_DIR', 'TEST_SAVE_DIR']:
+            if dy[tag][0] != "/":
+                dy[tag] = os.path.join(dy['PROJECT_DIR'], dy[tag])
+
+        for key in dy:
+            skey = 'self.'+key+'=dy["'+key+'"]'
+            exec(skey)
+
+        exec("self.dataset = datasets.{}".format(dy['DATASET']))
+        exec("self.network = models.{}".format(dy['BACKBONE']))
+
+        if not os.path.isdir(self.TEST_SAVE_DIR):
+            os.makedirs(self.TEST_SAVE_DIR, exist_ok=True)
 
