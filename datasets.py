@@ -355,12 +355,16 @@ class AFLW2000:
             fpo.write('{:.3f} {:.3f} {:.3f}'.format( prediction[0], prediction[1], prediction[2]))
             fpo.close()
         
-    def data_generator(self, shuffle=False, test=False):
-        sample_file = self.train_file
-        batch_size = self.batch_size
+    def data_generator(self, shuffle=False, test=False, mode='train'):
         if test:
             sample_file = self.test_file
             batch_size = 1
+        elif mode == 'train':
+            sample_file = self.train_file
+            batch_size = self.batch_size
+        else:   # validation
+            sample_file = self.test_file
+            batch_size = self.batch_size
             
         filenames = get_list_from_filenames(sample_file)
         file_num = len(filenames)

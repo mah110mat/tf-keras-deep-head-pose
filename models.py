@@ -5,24 +5,26 @@ import cv2
 import scipy.io as sio
 import utils
 
-#import tensorflow.contrib.eager as tfe
-#tfe.enable_eager_execution()
-#tf.compat.v1.enable_eager_execution()
-
-# np.set_printoptions(threshold=np.nan)
+physical_devices = tf.config.list_physical_devices('GPU')
+if len(physical_devices) > 0:
+    for device in physical_devices:
+        tf.config.experimental.set_memory_growth(device, True)
+        print('{} memory growth: {}'.format(device, tf.config.experimental.get_memory_growth(device)))
+else:
+    print("Not enough GPU hardware devices available")
 
 EPOCHS=25
 
-import sys
-
 class BASEMODEL:
-    def __init__(self, dataset, class_num, batch_size, input_size):
+    def __init__(self, dataset, class_num, batch_size, input_size, save_dir, valid_dataset=None):
         self.class_num = class_num
         self.batch_size = batch_size
         self.input_size = input_size
         self.idx_tensor = [idx for idx in range(self.class_num)]
         self.idx_tensor = tf.Variable(np.array(self.idx_tensor, dtype=np.float32))
         self.dataset = dataset
+        self.valid_dataset = valid_dataset
+        self.save_dir = save_dir
         #self.model = self.__create_model()
         
     def loss_angle(self, y_true, y_pred, alpha=0.5):
@@ -44,22 +46,62 @@ class BASEMODEL:
     def train(self, model_path, max_epoches=EPOCHS, load_weight=True):
         self.model.summary()
 
-        csv_logger = tf.keras.callbacks.CSVLogger('training.log', append=True)
-        
         if load_weight:
             self.model.load_weights(model_path)
         else:
-            self.model.fit_generator(generator=self.dataset.data_generator(test=False),
+            csv_logger = tf.keras.callbacks.CSVLogger('training.log', append=True)
+            tb_cb = tf.keras.callbacks.TensorBoard(log_dir=self.save_dir, histogram_freq=1)
+            best_model = model_path.replace('.h5', '_best.h5')
+            modelCheckpoint = tf.keras.callbacks.ModelCheckpoint(filepath = best_model,
+                                  monitor='val_loss',
+                                  verbose=1,
+                                  save_best_only=True,
+                                  save_weights_only=False,
+                                  mode='min',
+                                  period=1)
+            early_stopping =  tf.keras.callbacks.EarlyStopping(
+                            monitor='val_loss',
+                            min_delta=0.0,
+                            patience=10,
+                            )
+            def lr_schedul(epoch):
+                x = 0.0002
+                if epoch >= 20:
+                    x = 0.0001
+                if epoch >= 100:
+                    x = 0.00005
+                return x
+            lr_decay = tf.keras.callbacks.LearningRateScheduler( lr_schedul, verbose=1,)
+            callbacks=[ tf.keras.callbacks.TerminateOnNaN(), 
+                        modelCheckpoint,
+                        csv_logger, 
+                        lr_decay,
+                        early_stopping,
+                        tb_cb]
+        
+            if self.valid_dataset != None:
+                self.model.fit_generator(generator=self.dataset.data_generator(test=False),
                                     epochs=max_epoches,
                                     steps_per_epoch=self.dataset.train_num // self.batch_size,
-                                    callbacks=[tf.keras.callbacks.TerminateOnNaN(), csv_logger],
+                                    callbacks=callbacks,
+                                    max_queue_size=10,
+                                    workers=1,
+                                    validation_data=self.valid_dataset.data_generator(test=False, mode='valid'),
+                                    validation_steps=self.valid_dataset.test_num // self.batch_size,
+                                    verbose=1)
+            else:
+                self.model.fit_generator(generator=self.dataset.data_generator(test=False),
+                                    epochs=max_epoches,
+                                    steps_per_epoch=self.dataset.train_num // self.batch_size,
+                                    callbacks=callbacks,
                                     max_queue_size=10,
                                     workers=1,
                                     verbose=1)
 
-            self.model.save(model_path)
+            last_model = model_path.replace('.h5', '_last.h5')
+            self.model.save(last_model)
             
-    def test(self, save_dir):
+    def test(self):
         num_test = self.dataset.test_num
         for i, (images, [batch_yaw, batch_pitch, batch_roll], names) in enumerate(self.dataset.data_generator(test=True)):
             if i >= num_test: break
@@ -70,7 +112,7 @@ class BASEMODEL:
             pred_cont_roll = tf.reduce_sum(tf.nn.softmax(predictions[2,:,:]) * self.idx_tensor, 1) * 3 - 99
             # print(pred_cont_yaw.shape)
             
-            self.dataset.save_test(names[0], save_dir, [pred_cont_yaw[0], pred_cont_pitch[0], pred_cont_roll[0]])
+            self.dataset.save_test(names[0], self.save_dir, [pred_cont_yaw[0], pred_cont_pitch[0], pred_cont_roll[0]])
 
     def test_online(self, face_imgs):
         batch_x = np.array(face_imgs, dtype=np.float32)
@@ -104,8 +146,8 @@ class BASEMODEL:
 
 
 class AlexNet(BASEMODEL):
-    def __init__(self, dataset, class_num, batch_size, input_size):
-        super().__init__(dataset, class_num, batch_size, input_size)
+    def __init__(self, dataset, class_num, batch_size, input_size, save_dir, valid_dataset='None'):
+        super().__init__(dataset, class_num, batch_size, input_size, save_dir, valid_dataset=valid_dataset)
         self.model = self.__create_model()
 
     def preprocess(self, img):
@@ -149,8 +191,8 @@ class AlexNet(BASEMODEL):
         return model
         
 class Mobilenetv2(BASEMODEL):
-    def __init__(self, dataset, class_num, batch_size, input_size):
-        super().__init__(dataset, class_num, batch_size, input_size)
+    def __init__(self, dataset, class_num, batch_size, input_size, save_dir, valid_dataset='None'):
+        super().__init__(dataset, class_num, batch_size, input_size, save_dir, valid_dataset=valid_dataset)
         self.model = self.__create_model()
 
     def __create_model(self):
@@ -164,12 +206,12 @@ class Mobilenetv2(BASEMODEL):
         feature = backbone(inputs)
 
         #feature = keras.layers.SeparableConv2D(1280 , kernel_size=3, strides=1, activation="relu")(feature)
-        #feature = tf.keras.layers.GlobalAveragePooling2D()(feature)
+        feature = tf.keras.layers.GlobalAveragePooling2D()(feature)
 
-        feature = tf.keras.layers.MaxPool2D(pool_size=(3, 3), strides=2)(feature)
-        feature = tf.keras.layers.Flatten()(feature)
+        #feature = tf.keras.layers.MaxPool2D(pool_size=(3, 3), strides=2)(feature)
+        #feature = tf.keras.layers.Flatten()(feature)
         feature = tf.keras.layers.Dropout(0.5)(feature)
-        feature = tf.keras.layers.Dense(units=4096, activation=tf.nn.relu)(feature)
+        #feature = tf.keras.layers.Dense(units=4096, activation=tf.nn.relu)(feature)
         
         fc_yaw = tf.keras.layers.Dense(name='yaw', units=self.class_num)(feature)
         fc_pitch = tf.keras.layers.Dense(name='pitch', units=self.class_num)(feature)

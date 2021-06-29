@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 import scipy.io as sio
 from math import cos, sin
+import tensorflow as tf
 #import dlib
 #from imutils import face_utils
 
@@ -125,4 +126,5 @@ def crop_face_loosely(shape, img, input_size):
     normed_img = (input_img - input_img.mean()) / input_img.std()
     
     return normed_img
+
 
